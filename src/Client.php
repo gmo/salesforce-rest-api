@@ -30,7 +30,7 @@ class Client {
 	/** @var string */
 	protected $access_token;
 
-	const SALESFORCE_API_URL_PATTERN = 'https://na5.salesforce.com/services/data/v31.0/';
+	const SALESFORCE_API_URL_PATTERN = 'https://{region}.salesforce.com/services/data/{version}/';
 
 	/**
 	 * Creates a Salesforce REST API client that uses username-password authentication
