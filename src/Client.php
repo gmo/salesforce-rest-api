@@ -314,11 +314,25 @@ class Client {
 			$response = $e->getResponse();
 			$responseBody = $response->getBody();
 			$message = $responseBody;
+
 			$jsonResponse = json_decode($responseBody, true);
 			if(isset($jsonResponse[0]) && isset($jsonResponse[0]['message'])) {
 				$message = $jsonResponse[0]['message'];
 			}
-			$this->log->error($message, array('response' => $responseBody));
+
+			$fields = array();
+			if(isset($jsonResponse[0]) && isset($jsonResponse[0]['fields'])) {
+				$fields = $jsonResponse[0]['fields'];
+			}
+			$this->log->error($message, array(
+				'response' => $responseBody,
+				'fields' => $fields,
+			));
+
+			if($fields) {
+				throw new Exception\SalesforceFields($message, 0, $fields);
+			}
+
 			throw new Exception\Salesforce($message);
 		}
 
