@@ -69,11 +69,15 @@ class Client {
 
 	/**
 	 * Makes a call to the Query API
-	 * @param $queryString
+	 * @param string $queryString
+	 * @param array $parameters Parameters to bind
 	 * @return mixed The API output, converted from JSON to an associative array
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function query($queryString) {
+	public function query($queryString, $parameters = array()) {
+		if(!empty($parameters)) {
+			$queryString = $this->bindParameters($queryString, $parameters);
+		}
 		$queryString = urlencode($queryString);
 		$response = $this->get("query/?q={$queryString}");
 		$jsonResponse = json_decode($response, true);
@@ -89,11 +93,15 @@ class Client {
 
 	/**
 	 * Makes a call to the QueryAll API
-	 * @param $queryString
+	 * @param string $queryString
+	 * @param array $parameters Parameters to bind
 	 * @return mixed The API output, converted from JSON to an associative array
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function queryAll($queryString) {
+	public function queryAll($queryString, $parameters = array()) {
+		if(!empty($parameters)) {
+			$queryString = $this->bindParameters($queryString, $parameters);
+		}
 		$queryString = urlencode($queryString);
 		$response = $this->get("queryAll/?q={$queryString}");
 		$jsonResponse = json_decode($response, true);
@@ -370,6 +378,55 @@ class Client {
 		}
 
 		$this->access_token = $jsonResponse['access_token'];
+	}
 
+	/**
+	 * @param string $queryString
+	 * @param array $parameters
+	 * @return string
+	 */
+	protected function bindParameters($queryString, $parameters) {
+		$paramKeys = array_keys($parameters);
+		$isNumericIndexes = array_reduce(array_map('is_int', $paramKeys), function($carry, $item) { return $carry && $item; }, true);
+
+		if($isNumericIndexes) {
+			$searchArray = array_fill(0, count($paramKeys), '?');
+			$replaceArray = array_values($parameters);
+		} else {
+			// NOTE: krsort here will prevent the scenario of a replacement of array('foo' => 1, 'foobar' => 2) on string "Hi :foobar" resulting in "Hi 1bar"
+			krsort($parameters);
+			$searchArray = array_map(function($string) { return ':' . $string; }, array_keys($parameters));
+			$replaceArray = array_values($parameters);
+		}
+
+		$replaceArray = $this->addQuotesToStringReplacements($replaceArray);
+		$replaceArray = $this->replaceBooleansWithStringLiterals($replaceArray);
+		return str_replace($searchArray, $replaceArray, $queryString);
+	}
+
+	protected function addQuotesToStringReplacements($replacements) {
+		foreach($replacements as $key => $val) {
+			if(is_string($val) && !$this->isSalesforceDateFormat($val)) {
+				$val = str_replace("'", "\'", $val);
+				$replacements[$key] = "'{$val}'";
+			}
+		}
+
+		return $replacements;
+	}
+
+	protected function replaceBooleansWithStringLiterals($replacements) {
+		return array_map(function($val) {
+			if(!is_bool($val)) {
+				return $val;
+			}
+
+			$retval = $val ? 'true' : 'false';
+			return $retval;
+		}, $replacements);
+	}
+
+	protected function isSalesforceDateFormat($string) {
+		return preg_match('/\d+[-]\d+[-]\d+[T]\d+[:]\d+[:]\d+[Z]/', $string) === 1;
 	}
 }
