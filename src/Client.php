@@ -16,8 +16,6 @@ class Client {
 	protected $log;
 	/** @var  Http\Client */
 	protected $guzzle;
-	/** @var string */
-	protected $accessToken;
 	/** @var AuthenticationInterface */
 	protected $authentication;
 
@@ -374,7 +372,7 @@ class Client {
 	 * Lazy loads the access token by running authentication and setting the access token into the $this->guzzle headers
 	 */
 	protected function initializeGuzzle() {
-		$this->accessToken = $this->authentication->getAccessToken();
-		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$this->accessToken}");
+		$accessToken = $this->authentication->getAccessToken();
+		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
 	}
 }
