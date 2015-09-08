@@ -1,6 +1,7 @@
 <?php
 namespace Gmo\Salesforce;
 
+use Gmo\Salesforce\Authentication\AuthenticationInterface;
 use Guzzle\Http;
 use Psr\Log\LoggerInterface;
 use Guzzle\Http\Exception\ClientErrorResponseException;
@@ -11,57 +12,36 @@ class Client {
 
 	/** @var string */
 	protected $apiBaseUrl;
-	/** @var string */
-	protected $loginApiUrl;
-	/** @var string */
-	protected $clientId;
-	/** @var string */
-	protected $clientSecret;
-	/** @var string */
-	protected $username;
-	/** @var string */
-	protected $password;
-	/** @var string */
-	protected $securityToken;
 	/** @var LoggerInterface */
 	protected $log;
 	/** @var  Http\Client */
 	protected $guzzle;
 	/** @var string */
-	protected $access_token;
+	protected $accessToken;
+	/** @var AuthenticationInterface */
+	protected $authentication;
 
 	const SALESFORCE_API_URL_PATTERN = 'https://{region}.salesforce.com/services/data/{version}/';
 
 	/**
 	 * Creates a Salesforce REST API client that uses username-password authentication
+	 * @param AuthenticationInterface $authentication
 	 * @param string $apiRegion The region to use for the Salesforce API.  i.e. na5 or cs30
-	 * @param string $clientId The client id for your Salesforce API access
-	 * @param string $clientSecret The client secret for your Salesforce API access
-	 * @param string $username The username you want to access the API as
-	 * @param string $password The password for the provided username
-	 * @param string $securityToken The security token for the provided username
 	 * @param string $apiVersion The version of the API to use.  i.e. v31.0
-	 * @param string $loginApiUrl The login URL for your Salesforce instance
 	 * @param LoggerInterface $log
-	 * @throws Exception\Salesforce
 	 */
-	public function __construct($apiRegion, $clientId, $clientSecret, $username, $password, $securityToken,
-		$apiVersion = 'v31.0',
-		$loginApiUrl = "https://login.salesforce.com/services/", LoggerInterface $log = null
-	) {
+	public function __construct(AuthenticationInterface $authentication, $apiRegion, $apiVersion = 'v31.0', LoggerInterface $log = null) {
 		$this->apiBaseUrl = str_replace(array('{region}', '{version}'), array($apiRegion, $apiVersion), static::SALESFORCE_API_URL_PATTERN);
-		$this->loginApiUrl = $loginApiUrl;
-		$this->clientId = $clientId;
-		$this->clientSecret = $clientSecret;
-		$this->username = $username;
-		$this->password = $password;
-		$this->securityToken = $securityToken;
 		$this->log = $log ?: new NullLogger();
-		$this->login();
+
+		$this->authentication = $authentication;
+		$this->authentication->run();
+		$this->accessToken = $this->authentication->getAccessToken();
+
 		$this->guzzle = new Http\Client($this->apiBaseUrl, array(
 			'request.options' => array(
 				'headers' => array(
-					"Authorization" => "Bearer {$this->access_token}"
+					"Authorization" => "Bearer {$this->accessToken}"
 				),
 			),
 		));
@@ -345,39 +325,6 @@ class Client {
 		}
 
 		return $responseBody;
-	}
-
-	protected function login() {
-		$client = new Http\Client($this->loginApiUrl);
-		$post_fields = array(
-			'grant_type' => 'password',
-			'client_id' => $this->clientId,
-			'client_secret' => $this->clientSecret,
-			'username' => $this->username,
-			'password' => $this->password . $this->securityToken,
-		);
-		$request = $client->post('oauth2/token', null, $post_fields);
-		$request->setAuth('user', 'pass');
-		$response = $request->send();
-		$responseBody = $response->getBody();
-		$jsonResponse = json_decode($responseBody, true);
-
-		if($response->getStatusCode() !== 200) {
-			$message = $responseBody;
-			if(isset($jsonResponse['error_description'])) {
-				$message = $jsonResponse['error_description'];
-			}
-			$this->log->error($message, array('response' => $responseBody));
-			throw new Exception\Salesforce($message);
-		}
-
-		if(!isset($jsonResponse['access_token']) || empty($jsonResponse['access_token'])) {
-			$message = 'Access token not found';
-			$this->log->error($message, array('response' => $responseBody));
-			throw new Exception\Salesforce($message);
-		}
-
-		$this->access_token = $jsonResponse['access_token'];
 	}
 
 	/**

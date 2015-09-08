@@ -17,29 +17,29 @@ Initialize the `Salesforce\Client` class, call the APIs you want.
 use Gmo\Salesforce;
 use Gmo\Salesforce\Exception;
 
-$salesforce = new Salesforce\Client(
-	"na5",
+$authentication = new Salesforce\Authentication\PasswordAuthentication(
 	"ClientId",
 	"ClientSecret",
 	"Username",
 	"Password",
 	"SecurityToken"
 );
+$salesforce = new Salesforce\Client($authentication, "na5");
 
 try {
-	$contactRecords = $salesforce->query("SELECT AccountId, LastName
+	$contactQueryResults = $salesforce->query("SELECT AccountId, LastName
 		FROM Contact
 		WHERE FirstName = ?",
 		array('Alice')
 	);
-	print_r($contactRecords);   // The output of the query API JSON, converted to associative array
+	print_r($contactQueryResults->getResults());   // The output of the query API JSON, converted to associative array
 	
-    $contactRecords2 = $salesforce->query("SELECT AccountId, LastName
+    $contactQueryResults2 = $salesforce->query("SELECT AccountId, LastName
         FROM Contact
         WHERE FirstName = :firstName",
         array('firstName' => 'Bob')
     );
-	print_r($contactRecords2);   // The output of the query API JSON, converted to associative array
+	print_r($contactQueryResults2->getResults());   // The output of the query API JSON, converted to associative array
 
 } catch(Exception\SalesforceNoResults $e) {
 	// Do something when you have no results from your query
