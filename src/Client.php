@@ -39,17 +39,14 @@ class Client {
 
 	/**
 	 * Makes a call to the Query API
-	 * @param string $queryString
+	 * @param QueryResults|string $queryToRun
 	 * @param array $parameters Parameters to bind
 	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function query($queryString, $parameters = array()) {
-		if(!empty($parameters)) {
-			$queryString = $this->bindParameters($queryString, $parameters);
-		}
-		$queryString = urlencode($queryString);
-		$response = $this->get("query/?q={$queryString}");
+	public function query($queryToRun, $parameters = array()) {
+		$apiPath = $this->buildApiPathForQuery('query', $queryToRun, $parameters);
+		$response = $this->get($apiPath);
 		$jsonResponse = json_decode($response, true);
 
 		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
@@ -63,17 +60,14 @@ class Client {
 
 	/**
 	 * Makes a call to the QueryAll API
-	 * @param string $queryString
+	 * @param QueryResults|string $queryToRun
 	 * @param array $parameters Parameters to bind
 	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function queryAll($queryString, $parameters = array()) {
-		if(!empty($parameters)) {
-			$queryString = $this->bindParameters($queryString, $parameters);
-		}
-		$queryString = urlencode($queryString);
-		$response = $this->get("queryAll/?q={$queryString}");
+	public function queryAll($queryToRun, $parameters = array()) {
+		$apiPath = $this->buildApiPathForQuery('queryAll', $queryToRun, $parameters);
+		$response = $this->get($apiPath);
 		$jsonResponse = json_decode($response, true);
 
 		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
@@ -319,6 +313,27 @@ class Client {
 	}
 
 	/**
+	 * @param string $queryMethod
+	 * @param string|QueryResults $queryToRun
+	 * @param array $parameters
+	 * @return string
+	 */
+	protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = array()) {
+		if($queryToRun instanceof QueryResults) {
+			$basePath = $this->getPathFromUrl($this->apiBaseUrl);
+			$nextRecordsRelativePath = str_replace($basePath, '', $queryToRun->getNextQuery());
+			return $nextRecordsRelativePath;
+		}
+
+		if(!empty($parameters)) {
+			$queryToRun = $this->bindParameters($queryToRun, $parameters);
+		}
+
+		$queryToRun = urlencode($queryToRun);
+		return "{$queryMethod}/?q={$queryToRun}";
+	}
+
+	/**
 	 * @param string $queryString
 	 * @param array $parameters
 	 * @return string
@@ -378,5 +393,10 @@ class Client {
 
 		$accessToken = $this->authentication->getAccessToken();
 		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
+	}
+
+	protected function getPathFromUrl($url) {
+		$parts = parse_url($url);
+		return $parts['path'];
 	}
 }
