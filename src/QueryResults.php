@@ -24,6 +24,7 @@ class QueryResults {
 	}
 
 	/**
+	 * Returns the total number of records that the query matched
 	 * @return int
 	 */
 	public function getTotalSize() {
@@ -31,6 +32,7 @@ class QueryResults {
 	}
 
 	/**
+	 * Returns whether or not there are more query results that haven't been returned in this results set
 	 * @return bool
 	 */
 	public function isDone() {
