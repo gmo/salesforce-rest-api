@@ -26,25 +26,17 @@ class Client {
 	/**
 	 * Creates a Salesforce REST API client that uses username-password authentication
 	 * @param AuthenticationInterface $authentication
+	 * @param Http\Client $guzzle
 	 * @param string $apiRegion The region to use for the Salesforce API.  i.e. na5 or cs30
 	 * @param string $apiVersion The version of the API to use.  i.e. v31.0
 	 * @param LoggerInterface $log
 	 */
-	public function __construct(AuthenticationInterface $authentication, $apiRegion, $apiVersion = 'v31.0', LoggerInterface $log = null) {
+	public function __construct(AuthenticationInterface $authentication, Http\Client $guzzle, $apiRegion, $apiVersion = 'v31.0', LoggerInterface $log = null) {
 		$this->apiBaseUrl = str_replace(array('{region}', '{version}'), array($apiRegion, $apiVersion), static::SALESFORCE_API_URL_PATTERN);
 		$this->log = $log ?: new NullLogger();
-
 		$this->authentication = $authentication;
-		$this->authentication->run();
-		$this->accessToken = $this->authentication->getAccessToken();
-
-		$this->guzzle = new Http\Client($this->apiBaseUrl, array(
-			'request.options' => array(
-				'headers' => array(
-					"Authorization" => "Bearer {$this->accessToken}"
-				),
-			),
-		));
+		$this->guzzle = $guzzle;
+		$this->guzzle->setBaseUrl($this->apiBaseUrl);
 	}
 
 	/**
@@ -293,6 +285,7 @@ class Client {
 	}
 
 	protected function request($type, $path, $headers = array(), $body = null, $options = array()) {
+		$this->initializeGuzzle();
 		$request = $this->guzzle->createRequest($type, $path, $headers, $body, $options);
 		try {
 			$response = $request->send();
@@ -375,5 +368,14 @@ class Client {
 
 	protected function isSalesforceDateFormat($string) {
 		return preg_match('/\d+[-]\d+[-]\d+[T]\d+[:]\d+[:]\d+[Z]/', $string) === 1;
+	}
+
+	/**
+	 * Lazy loads the access token by running authentication and setting the access token into the $this->guzzle headers
+	 */
+	protected function initializeGuzzle() {
+		$this->authentication->run();
+		$this->accessToken = $this->authentication->getAccessToken();
+		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$this->accessToken}");
 	}
 }
