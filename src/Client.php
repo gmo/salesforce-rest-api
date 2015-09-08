@@ -71,7 +71,7 @@ class Client {
 	 * Makes a call to the Query API
 	 * @param string $queryString
 	 * @param array $parameters Parameters to bind
-	 * @return mixed The API output, converted from JSON to an associative array
+	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
 	public function query($queryString, $parameters = array()) {
@@ -88,14 +88,14 @@ class Client {
 			throw new Exception\SalesforceNoResults($message);
 		}
 
-		return $jsonResponse['records'];
+		return new QueryResults($jsonResponse['records'], $jsonResponse['totalSize'], $jsonResponse['done'], $jsonResponse['nextRecordsUrl']);
 	}
 
 	/**
 	 * Makes a call to the QueryAll API
 	 * @param string $queryString
 	 * @param array $parameters Parameters to bind
-	 * @return mixed The API output, converted from JSON to an associative array
+	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
 	public function queryAll($queryString, $parameters = array()) {
@@ -112,7 +112,7 @@ class Client {
 			throw new Exception\SalesforceNoResults($message);
 		}
 
-		return $jsonResponse['records'];
+		return new QueryResults($jsonResponse['records'], $jsonResponse['totalSize'], $jsonResponse['done'], $jsonResponse['nextRecordsUrl']);
 	}
 
 	/**
