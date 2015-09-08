@@ -38,10 +38,14 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
 	}
 
 	/**
-	 * @return void
+	 * @return string
 	 * @throws Exception\SalesforceAuthentication
 	 */
-	public function run() {
+	public function getAccessToken() {
+		if($this->accessToken) {
+			return $this->accessToken;
+		}
+
 		$postFields = array(
 			'grant_type'    => 'password',
 			'client_id'     => $this->clientId,
@@ -71,12 +75,6 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
 		}
 
 		$this->accessToken = $jsonResponse['access_token'];
-	}
-
-	/**
-	 * @return string
-	 */
-	public function getAccessToken() {
 		return $this->accessToken;
 	}
 
