@@ -372,6 +372,10 @@ class Client {
 	 * Lazy loads the access token by running authentication and setting the access token into the $this->guzzle headers
 	 */
 	protected function initializeGuzzle() {
+		if($this->guzzle->getDefaultOption('headers/Authorization')) {
+			return;
+		}
+
 		$accessToken = $this->authentication->getAccessToken();
 		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
 	}
