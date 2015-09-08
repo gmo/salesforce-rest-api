@@ -23,9 +23,10 @@ $authentication = new Salesforce\Authentication\PasswordAuthentication(
 	"ClientSecret",
 	"Username",
 	"Password",
-	"SecurityToken"
+	"SecurityToken",
+	new Http\Client()
 );
-$salesforce = new Salesforce\Client($authentication, new Guzzle\Http(), "na5");
+$salesforce = new Salesforce\Client($authentication, new Http\Client(), "na5");
 
 try {
 	$contactQueryResults = $salesforce->query("SELECT AccountId, LastName

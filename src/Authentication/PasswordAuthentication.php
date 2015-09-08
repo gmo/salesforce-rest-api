@@ -12,8 +12,6 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
 	/** @var LoggerInterface */
 	protected $log;
 	/** @var string */
-	protected $loginApiUrl;
-	/** @var string */
 	protected $clientId;
 	/** @var string */
 	protected $clientSecret;
@@ -25,15 +23,18 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
 	protected $securityToken;
 	/** @var string */
 	protected $accessToken;
+	/** @var Http\Client */
+	private $guzzle;
 
-	public function __construct($clientId, $clientSecret, $username, $password, $securityToken, LoggerInterface $log = null, $loginApiUrl = "https://login.salesforce.com/services/") {
+	public function __construct($clientId, $clientSecret, $username, $password, $securityToken, Http\Client $guzzle, LoggerInterface $log = null, $loginApiUrl = "https://login.salesforce.com/services/") {
 		$this->log = $log ?: new NullLogger();
-		$this->loginApiUrl = $loginApiUrl;
 		$this->clientId = $clientId;
 		$this->clientSecret = $clientSecret;
 		$this->username = $username;
 		$this->password = $password;
 		$this->securityToken = $securityToken;
+		$this->guzzle = $guzzle;
+		$this->guzzle->setBaseUrl($loginApiUrl);
 	}
 
 	/**
@@ -41,15 +42,14 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
 	 * @throws Exception\SalesforceAuthentication
 	 */
 	public function run() {
-		$client = new Http\Client($this->loginApiUrl);
-		$post_fields = array(
-			'grant_type' => 'password',
-			'client_id' => $this->clientId,
+		$postFields = array(
+			'grant_type'    => 'password',
+			'client_id'     => $this->clientId,
 			'client_secret' => $this->clientSecret,
-			'username' => $this->username,
-			'password' => $this->password . $this->securityToken,
+			'username'      => $this->username,
+			'password'      => $this->password . $this->securityToken,
 		);
-		$request = $client->post('oauth2/token', null, $post_fields);
+		$request = $this->guzzle->post('oauth2/token', null, $postFields);
 		$request->setAuth('user', 'pass');
 		$response = $request->send();
 		$responseBody = $response->getBody();
