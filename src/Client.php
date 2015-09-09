@@ -1,118 +1,78 @@
 <?php
 namespace Gmo\Salesforce;
 
-use Guzzle\Http;
-use Psr\Log\LoggerInterface;
-use Guzzle\Http\Exception\ClientErrorResponseException;
-use Psr\Log\NullLogger;
+use Gmo\Salesforce\Authentication\AuthenticationInterface;
 use Gmo\Salesforce\Exception;
+use Guzzle\Http;
+use Guzzle\Http\Exception\ClientErrorResponseException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 class Client {
 
 	/** @var string */
 	protected $apiBaseUrl;
-	/** @var string */
-	protected $loginApiUrl;
-	/** @var string */
-	protected $clientId;
-	/** @var string */
-	protected $clientSecret;
-	/** @var string */
-	protected $username;
-	/** @var string */
-	protected $password;
-	/** @var string */
-	protected $securityToken;
 	/** @var LoggerInterface */
 	protected $log;
 	/** @var  Http\Client */
 	protected $guzzle;
-	/** @var string */
-	protected $access_token;
+	/** @var AuthenticationInterface */
+	protected $authentication;
 
 	const SALESFORCE_API_URL_PATTERN = 'https://{region}.salesforce.com/services/data/{version}/';
 
 	/**
 	 * Creates a Salesforce REST API client that uses username-password authentication
+	 * @param AuthenticationInterface $authentication
+	 * @param Http\Client $guzzle
 	 * @param string $apiRegion The region to use for the Salesforce API.  i.e. na5 or cs30
-	 * @param string $clientId The client id for your Salesforce API access
-	 * @param string $clientSecret The client secret for your Salesforce API access
-	 * @param string $username The username you want to access the API as
-	 * @param string $password The password for the provided username
-	 * @param string $securityToken The security token for the provided username
 	 * @param string $apiVersion The version of the API to use.  i.e. v31.0
-	 * @param string $loginApiUrl The login URL for your Salesforce instance
 	 * @param LoggerInterface $log
-	 * @throws Exception\Salesforce
 	 */
-	public function __construct($apiRegion, $clientId, $clientSecret, $username, $password, $securityToken,
-		$apiVersion = 'v31.0',
-		$loginApiUrl = "https://login.salesforce.com/services/", LoggerInterface $log = null
-	) {
+	public function __construct(AuthenticationInterface $authentication, Http\Client $guzzle, $apiRegion, $apiVersion = 'v31.0', LoggerInterface $log = null) {
 		$this->apiBaseUrl = str_replace(array('{region}', '{version}'), array($apiRegion, $apiVersion), static::SALESFORCE_API_URL_PATTERN);
-		$this->loginApiUrl = $loginApiUrl;
-		$this->clientId = $clientId;
-		$this->clientSecret = $clientSecret;
-		$this->username = $username;
-		$this->password = $password;
-		$this->securityToken = $securityToken;
 		$this->log = $log ?: new NullLogger();
-		$this->login();
-		$this->guzzle = new Http\Client($this->apiBaseUrl, array(
-			'request.options' => array(
-				'headers' => array(
-					"Authorization" => "Bearer {$this->access_token}"
-				),
-			),
-		));
+		$this->authentication = $authentication;
+		$this->guzzle = $guzzle;
+		$this->guzzle->setBaseUrl($this->apiBaseUrl);
 	}
 
 	/**
 	 * Makes a call to the Query API
-	 * @param string $queryString
+	 * @param QueryResults|string $queryToRun
 	 * @param array $parameters Parameters to bind
-	 * @return mixed The API output, converted from JSON to an associative array
+	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function query($queryString, $parameters = array()) {
-		if(!empty($parameters)) {
-			$queryString = $this->bindParameters($queryString, $parameters);
-		}
-		$queryString = urlencode($queryString);
-		$response = $this->get("query/?q={$queryString}");
-		$jsonResponse = json_decode($response, true);
-
-		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
-			$message = 'No results found';
-			$this->log->info($message, array('response' => $response));
-			throw new Exception\SalesforceNoResults($message);
-		}
-
-		return $jsonResponse['records'];
+	public function query($queryToRun, $parameters = array()) {
+		$apiPath = $this->buildApiPathForQuery('query', $queryToRun, $parameters);
+		$queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
+		return new QueryIterator($this, $queryResults);
 	}
 
 	/**
 	 * Makes a call to the QueryAll API
-	 * @param string $queryString
+	 * @param QueryResults|string $queryToRun
 	 * @param array $parameters Parameters to bind
-	 * @return mixed The API output, converted from JSON to an associative array
+	 * @return QueryResults
 	 * @throws Exception\SalesforceNoResults
 	 */
-	public function queryAll($queryString, $parameters = array()) {
-		if(!empty($parameters)) {
-			$queryString = $this->bindParameters($queryString, $parameters);
-		}
-		$queryString = urlencode($queryString);
-		$response = $this->get("queryAll/?q={$queryString}");
-		$jsonResponse = json_decode($response, true);
+	public function queryAll($queryToRun, $parameters = array()) {
+		$apiPath = $this->buildApiPathForQuery('queryAll', $queryToRun, $parameters);
+		$queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
+		return new QueryIterator($this, $queryResults);
+	}
 
-		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
-			$message = 'No results found';
-			$this->log->info($message, array('response' => $response));
-			throw new Exception\SalesforceNoResults($message);
-		}
-
-		return $jsonResponse['records'];
+	/**
+	 * Fetch the next QueryResults for a query that has multiple pages worth of returned records
+	 * @param QueryResults $queryResults
+	 * @return QueryResults
+	 * @throws Exception\SalesforceNoResults
+	 */
+	public function getNextQueryResults(QueryResults $queryResults) {
+		$basePath = $this->getPathFromUrl($this->apiBaseUrl);
+		$nextRecordsRelativePath = str_replace($basePath, '', $queryResults->getNextQuery());
+		return $this->callQueryApiAndGetQueryResults($nextRecordsRelativePath);
 	}
 
 	/**
@@ -313,6 +273,7 @@ class Client {
 	}
 
 	protected function request($type, $path, $headers = array(), $body = null, $options = array()) {
+		$this->initializeGuzzle();
 		$request = $this->guzzle->createRequest($type, $path, $headers, $body, $options);
 		try {
 			$response = $request->send();
@@ -347,37 +308,43 @@ class Client {
 		return $responseBody;
 	}
 
-	protected function login() {
-		$client = new Http\Client($this->loginApiUrl);
-		$post_fields = array(
-			'grant_type' => 'password',
-			'client_id' => $this->clientId,
-			'client_secret' => $this->clientSecret,
-			'username' => $this->username,
-			'password' => $this->password . $this->securityToken,
+	/**
+	 * @param string $queryMethod
+	 * @param string $queryToRun
+	 * @param array $parameters
+	 * @return string
+	 */
+	protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = array()) {
+		if(!empty($parameters)) {
+			$queryToRun = $this->bindParameters($queryToRun, $parameters);
+		}
+
+		$queryToRun = urlencode($queryToRun);
+		return "{$queryMethod}/?q={$queryToRun}";
+	}
+
+	/**
+	 * Call the API for the provided query API path, handle No Results, and return a QueryResults object
+	 * @param $apiPath
+	 * @return QueryResults
+	 * @throws Exception\SalesforceNoResults
+	 */
+	protected function callQueryApiAndGetQueryResults($apiPath) {
+		$response = $this->get($apiPath);
+		$jsonResponse = json_decode($response, true);
+
+		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
+			$message = 'No results found';
+			$this->log->info($message, array('response' => $response));
+			throw new Exception\SalesforceNoResults($message);
+		}
+
+		return new QueryResults(
+			$jsonResponse['records'],
+			$jsonResponse['totalSize'],
+			$jsonResponse['done'],
+			isset($jsonResponse['nextRecordsUrl']) ? $jsonResponse['nextRecordsUrl'] : null
 		);
-		$request = $client->post('oauth2/token', null, $post_fields);
-		$request->setAuth('user', 'pass');
-		$response = $request->send();
-		$responseBody = $response->getBody();
-		$jsonResponse = json_decode($responseBody, true);
-
-		if($response->getStatusCode() !== 200) {
-			$message = $responseBody;
-			if(isset($jsonResponse['error_description'])) {
-				$message = $jsonResponse['error_description'];
-			}
-			$this->log->error($message, array('response' => $responseBody));
-			throw new Exception\Salesforce($message);
-		}
-
-		if(!isset($jsonResponse['access_token']) || empty($jsonResponse['access_token'])) {
-			$message = 'Access token not found';
-			$this->log->error($message, array('response' => $responseBody));
-			throw new Exception\Salesforce($message);
-		}
-
-		$this->access_token = $jsonResponse['access_token'];
 	}
 
 	/**
@@ -428,5 +395,22 @@ class Client {
 
 	protected function isSalesforceDateFormat($string) {
 		return preg_match('/\d+[-]\d+[-]\d+[T]\d+[:]\d+[:]\d+[Z]/', $string) === 1;
+	}
+
+	/**
+	 * Lazy loads the access token by running authentication and setting the access token into the $this->guzzle headers
+	 */
+	protected function initializeGuzzle() {
+		if($this->guzzle->getDefaultOption('headers/Authorization')) {
+			return;
+		}
+
+		$accessToken = $this->authentication->getAccessToken();
+		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
+	}
+
+	protected function getPathFromUrl($url) {
+		$parts = parse_url($url);
+		return $parts['path'];
 	}
 }

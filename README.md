@@ -16,30 +16,36 @@ Initialize the `Salesforce\Client` class, call the APIs you want.
 ```php
 use Gmo\Salesforce;
 use Gmo\Salesforce\Exception;
+use Guzzle\Http;
 
-$salesforce = new Salesforce\Client(
-	"na5",
+$authentication = new Salesforce\Authentication\PasswordAuthentication(
 	"ClientId",
 	"ClientSecret",
 	"Username",
 	"Password",
-	"SecurityToken"
+	"SecurityToken",
+	new Http\Client()
 );
+$salesforce = new Salesforce\Client($authentication, new Http\Client(), "na5");
 
 try {
-	$contactRecords = $salesforce->query("SELECT AccountId, LastName
+	$contactQueryResults = $salesforce->query("SELECT AccountId, LastName
 		FROM Contact
 		WHERE FirstName = ?",
 		array('Alice')
 	);
-	print_r($contactRecords);   // The output of the query API JSON, converted to associative array
+	foreach($contactQueryResults as $queryResult) {
+		print_r($queryResult);  // The output of a single record from the query API JSON, converted to associative array
+	}
 	
-    $contactRecords2 = $salesforce->query("SELECT AccountId, LastName
+    $contactQueryResults2 = $salesforce->query("SELECT AccountId, LastName
         FROM Contact
         WHERE FirstName = :firstName",
         array('firstName' => 'Bob')
     );
-	print_r($contactRecords2);   // The output of the query API JSON, converted to associative array
+    foreach($contactQueryResults2 as $queryResult) {
+        print_r($queryResult);  // The output of a single record from the query API JSON, converted to associative array
+    }
 
 } catch(Exception\SalesforceNoResults $e) {
 	// Do something when you have no results from your query
