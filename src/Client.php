@@ -2,11 +2,11 @@
 namespace Gmo\Salesforce;
 
 use Gmo\Salesforce\Authentication\AuthenticationInterface;
-use Guzzle\Http;
-use Psr\Log\LoggerInterface;
-use Guzzle\Http\Exception\ClientErrorResponseException;
-use Psr\Log\NullLogger;
 use Gmo\Salesforce\Exception;
+use Guzzle\Http;
+use Guzzle\Http\Exception\ClientErrorResponseException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 class Client {
 
@@ -46,16 +46,8 @@ class Client {
 	 */
 	public function query($queryToRun, $parameters = array()) {
 		$apiPath = $this->buildApiPathForQuery('query', $queryToRun, $parameters);
-		$response = $this->get($apiPath);
-		$jsonResponse = json_decode($response, true);
-
-		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
-			$message = 'No results found';
-			$this->log->info($message, array('response' => $response));
-			throw new Exception\SalesforceNoResults($message);
-		}
-
-		return new QueryResults($jsonResponse['records'], $jsonResponse['totalSize'], $jsonResponse['done'], $jsonResponse['nextRecordsUrl']);
+		$queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
+		return new QueryIterator($this, $queryResults);
 	}
 
 	/**
@@ -67,16 +59,20 @@ class Client {
 	 */
 	public function queryAll($queryToRun, $parameters = array()) {
 		$apiPath = $this->buildApiPathForQuery('queryAll', $queryToRun, $parameters);
-		$response = $this->get($apiPath);
-		$jsonResponse = json_decode($response, true);
+		$queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
+		return new QueryIterator($this, $queryResults);
+	}
 
-		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
-			$message = 'No results found';
-			$this->log->info($message, array('response' => $response));
-			throw new Exception\SalesforceNoResults($message);
-		}
-
-		return new QueryResults($jsonResponse['records'], $jsonResponse['totalSize'], $jsonResponse['done'], $jsonResponse['nextRecordsUrl']);
+	/**
+	 * Fetch the next QueryResults for a query that has multiple pages worth of returned records
+	 * @param QueryResults $queryResults
+	 * @return QueryResults
+	 * @throws Exception\SalesforceNoResults
+	 */
+	public function getNextQueryResults(QueryResults $queryResults) {
+		$basePath = $this->getPathFromUrl($this->apiBaseUrl);
+		$nextRecordsRelativePath = str_replace($basePath, '', $queryResults->getNextQuery());
+		return $this->callQueryApiAndGetQueryResults($nextRecordsRelativePath);
 	}
 
 	/**
@@ -314,23 +310,41 @@ class Client {
 
 	/**
 	 * @param string $queryMethod
-	 * @param string|QueryResults $queryToRun
+	 * @param string $queryToRun
 	 * @param array $parameters
 	 * @return string
 	 */
 	protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = array()) {
-		if($queryToRun instanceof QueryResults) {
-			$basePath = $this->getPathFromUrl($this->apiBaseUrl);
-			$nextRecordsRelativePath = str_replace($basePath, '', $queryToRun->getNextQuery());
-			return $nextRecordsRelativePath;
-		}
-
 		if(!empty($parameters)) {
 			$queryToRun = $this->bindParameters($queryToRun, $parameters);
 		}
 
 		$queryToRun = urlencode($queryToRun);
 		return "{$queryMethod}/?q={$queryToRun}";
+	}
+
+	/**
+	 * Call the API for the provided query API path, handle No Results, and return a QueryResults object
+	 * @param $apiPath
+	 * @return QueryResults
+	 * @throws Exception\SalesforceNoResults
+	 */
+	protected function callQueryApiAndGetQueryResults($apiPath) {
+		$response = $this->get($apiPath);
+		$jsonResponse = json_decode($response, true);
+
+		if(!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
+			$message = 'No results found';
+			$this->log->info($message, array('response' => $response));
+			throw new Exception\SalesforceNoResults($message);
+		}
+
+		return new QueryResults(
+			$jsonResponse['records'],
+			$jsonResponse['totalSize'],
+			$jsonResponse['done'],
+			isset($jsonResponse['nextRecordsUrl']) ? $jsonResponse['nextRecordsUrl'] : null
+		);
 	}
 
 	/**

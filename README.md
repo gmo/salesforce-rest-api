@@ -34,14 +34,18 @@ try {
 		WHERE FirstName = ?",
 		array('Alice')
 	);
-	print_r($contactQueryResults->getResults());   // The output of the query API JSON, converted to associative array
+	foreach($contactQueryResults as $queryResult) {
+		print_r($queryResult);  // The output of a single record from the query API JSON, converted to associative array
+	}
 	
     $contactQueryResults2 = $salesforce->query("SELECT AccountId, LastName
         FROM Contact
         WHERE FirstName = :firstName",
         array('firstName' => 'Bob')
     );
-	print_r($contactQueryResults2->getResults());   // The output of the query API JSON, converted to associative array
+    foreach($contactQueryResults2 as $queryResult) {
+        print_r($queryResult);  // The output of a single record from the query API JSON, converted to associative array
+    }
 
 } catch(Exception\SalesforceNoResults $e) {
 	// Do something when you have no results from your query

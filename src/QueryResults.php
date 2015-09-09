@@ -9,7 +9,7 @@ class QueryResults {
 	protected $nextQuery;
 
 	public function __construct(array $results, $totalSize, $isDone, $nextQuery) {
-		$this->results = $results;
+		$this->results = array_values($results);
 		$this->totalSize = $totalSize;
 		$this->isDone = $isDone;
 		$this->nextQuery = $nextQuery;
