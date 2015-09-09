@@ -39,9 +39,9 @@ class Client {
 
 	/**
 	 * Makes a call to the Query API
-	 * @param QueryResults|string $queryToRun
+	 * @param string $queryToRun
 	 * @param array $parameters Parameters to bind
-	 * @return QueryResults
+	 * @return QueryIterator
 	 * @throws Exception\SalesforceNoResults
 	 */
 	public function query($queryToRun, $parameters = array()) {
@@ -52,9 +52,9 @@ class Client {
 
 	/**
 	 * Makes a call to the QueryAll API
-	 * @param QueryResults|string $queryToRun
+	 * @param string $queryToRun
 	 * @param array $parameters Parameters to bind
-	 * @return QueryResults
+	 * @return QueryIterator
 	 * @throws Exception\SalesforceNoResults
 	 */
 	public function queryAll($queryToRun, $parameters = array()) {
