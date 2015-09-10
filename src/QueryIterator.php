@@ -1,7 +1,7 @@
 <?php
 namespace Gmo\Salesforce;
 
-class QueryIterator implements \Iterator {
+class QueryIterator implements \Iterator, \Countable {
 	/** @var Client */
 	protected $client;
 	/** @var QueryResults */
@@ -79,6 +79,13 @@ class QueryIterator implements \Iterator {
 	 */
 	public function valid() {
 		return $this->valid;
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
+	public function count() {
+		return $this->currentResultsSet->getTotalSize();
 	}
 
 	/**
