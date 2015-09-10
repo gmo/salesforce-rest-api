@@ -1,4 +1,6 @@
 <?php
 namespace Gmo\Salesforce\Exception;
 
-class Salesforce extends \Exception {}
+class Salesforce extends \Exception
+{
+}

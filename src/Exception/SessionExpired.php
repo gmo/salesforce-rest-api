@@ -1,6 +1,7 @@
 <?php
 namespace Gmo\Salesforce\Exception;
 
-class SessionExpired extends SalesforceAuthentication {
-	const ERROR_CODE = 401;
+class SessionExpired extends SalesforceAuthentication
+{
+    const ERROR_CODE = 401;
 }

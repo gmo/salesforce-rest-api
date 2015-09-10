@@ -1,4 +1,6 @@
 <?php
 namespace Gmo\Salesforce\Exception;
 
-class SalesforceNoResults extends Salesforce {}
+class SalesforceNoResults extends Salesforce
+{
+}

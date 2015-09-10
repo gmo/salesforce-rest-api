@@ -2,6 +2,7 @@
 namespace Gmo\Salesforce\Exception;
 
 
-class SalesforceAuthentication extends Salesforce {
+class SalesforceAuthentication extends Salesforce
+{
 
 }

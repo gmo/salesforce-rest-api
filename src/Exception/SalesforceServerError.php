@@ -1,6 +1,7 @@
 <?php
 namespace Gmo\Salesforce\Exception;
 
-class SalesforceServerError {
-	const ERROR_CODE = 500;
+class SalesforceServerError
+{
+    const ERROR_CODE = 500;
 }
