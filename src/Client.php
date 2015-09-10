@@ -5,10 +5,11 @@ use Gmo\Salesforce\Authentication\AuthenticationInterface;
 use Gmo\Salesforce\Exception;
 use Guzzle\Http;
 use Guzzle\Http\Exception\ClientErrorResponseException;
+use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
-class Client {
+class Client implements LoggerAwareInterface {
 
 	/** @var string */
 	protected $apiBaseUrl;
@@ -258,6 +259,13 @@ class Client {
 
 		$this->patch("sobjects/{$object}/{$id}", $headers, $fields);
 		return true;
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	public function setLogger(LoggerInterface $logger) {
+		$this->log = $logger;
 	}
 
 	protected function get($path, $headers = array(), $body = null, $options = array()) {
