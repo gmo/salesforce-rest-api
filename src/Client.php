@@ -291,6 +291,7 @@ class Client implements LoggerAwareInterface {
 			$response = $e->getResponse();
 			$responseBody = $response->getBody();
 			$message = $responseBody;
+			$errorCode = $response->getStatusCode();
 
 			$jsonResponse = json_decode($responseBody, true);
 			if(isset($jsonResponse[0]) && isset($jsonResponse[0]['message'])) {
@@ -306,14 +307,40 @@ class Client implements LoggerAwareInterface {
 				'fields' => $fields,
 			));
 
-			if($fields) {
-				throw new Exception\SalesforceFields($message, 0, $fields);
-			}
-
-			throw new Exception\Salesforce($message);
+			throw $this->getExceptionForSalesforceError($message, $errorCode, $fields);
 		}
 
 		return $responseBody;
+	}
+
+	/**
+	 * @param string $message
+	 * @param int $code
+	 * @param array $fields
+	 * @return Exception\Salesforce
+	 */
+	protected function getExceptionForSalesforceError($message, $code, $fields) {
+		if(!empty($fields)) {
+			return new Exception\SalesforceFields($message, $code, $fields);
+		}
+
+		if($code === Exception\SessionExpired::ERROR_CODE) {
+			return new Exception\SessionExpired($message, $code);
+		}
+
+		if($code === Exception\RequestRefused::ERROR_CODE) {
+			return new Exception\RequestRefused($message, $code);
+		}
+
+		if($code === Exception\ResourceNotFound::ERROR_CODE) {
+			return new Exception\ResourceNotFound($message, $code);
+		}
+
+		if($code === Exception\UnsupportedFormat::ERROR_CODE) {
+			return new Exception\UnsupportedFormat($message, $code);
+		}
+
+		return new Exception\Salesforce($message, $code);
 	}
 
 	/**
