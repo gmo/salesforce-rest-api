@@ -269,15 +269,15 @@ class Client implements LoggerAwareInterface {
 	}
 
 	protected function get($path, $headers = array(), $body = null, $options = array()) {
-		return $this->request('GET', $path, $headers, $body, $options);
+		return $this->requestWithAutomaticReauthorize('GET', $path, $headers, $body, $options);
 	}
 
 	protected function post($path, $headers = array(), $body = null, $options = array()) {
-		return $this->request('POST', $path, $headers, $body, $options);
+		return $this->requestWithAutomaticReauthorize('POST', $path, $headers, $body, $options);
 	}
 
 	protected function patch($path, $headers = array(), $body = null, $options = array()) {
-		return $this->request('PATCH', $path, $headers, $body, $options);
+		return $this->requestWithAutomaticReauthorize('PATCH', $path, $headers, $body, $options);
 	}
 
 	protected function request($type, $path, $headers = array(), $body = null, $options = array()) {
@@ -311,6 +311,16 @@ class Client implements LoggerAwareInterface {
 		}
 
 		return $responseBody;
+	}
+
+	protected function requestWithAutomaticReauthorize($type, $path, $headers = array(), $body = null, $options = array()) {
+		try {
+			return $this->request($type, $path, $headers, $body, $options);
+		} catch(Exception\SessionExpired $e) {
+			var_dump('hi');
+			$this->setAccessTokenInGuzzleFromAuthentication();
+			return $this->request($type, $path, $headers, $body, $options);
+		}
 	}
 
 	/**
@@ -440,6 +450,10 @@ class Client implements LoggerAwareInterface {
 			return;
 		}
 
+		$this->setAccessTokenInGuzzleFromAuthentication();
+	}
+
+	protected function setAccessTokenInGuzzleFromAuthentication() {
 		$accessToken = $this->authentication->getAccessToken();
 		$this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
 	}
