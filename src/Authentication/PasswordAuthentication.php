@@ -89,6 +89,11 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
         return $this->accessToken;
     }
 
+    public function invalidateAccessToken()
+    {
+        $this->accessToken = null;
+    }
+
     /**
      * @inheritdoc
      */

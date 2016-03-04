@@ -177,7 +177,7 @@ class Client implements LoggerAwareInterface
         try {
             return $this->request($type, $path, $headers, $body, $options);
         } catch (Exception\SessionExpired $e) {
-            var_dump('hi');
+            $this->authentication->invalidateAccessToken();
             $this->setAccessTokenInGuzzleFromAuthentication();
 
             return $this->request($type, $path, $headers, $body, $options);

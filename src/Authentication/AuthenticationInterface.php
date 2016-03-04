@@ -10,4 +10,6 @@ interface AuthenticationInterface
      * @throws Exception\SalesforceAuthentication
      */
     public function getAccessToken();
+
+    public function invalidateAccessToken();
 }
