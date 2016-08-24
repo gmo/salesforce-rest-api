@@ -56,13 +56,13 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
             return $this->accessToken;
         }
 
-        $postFields = array(
-            'grant_type' => 'password',
-            'client_id' => $this->clientId,
+        $postFields = [
+            'grant_type'    => 'password',
+            'client_id'     => $this->clientId,
             'client_secret' => $this->clientSecret,
-            'username' => $this->username,
-            'password' => $this->password . $this->securityToken,
-        );
+            'username'      => $this->username,
+            'password'      => $this->password . $this->securityToken,
+        ];
         $request = $this->guzzle->post('oauth2/token', null, $postFields);
         $request->setAuth('user', 'pass');
         $response = $request->send();
@@ -74,13 +74,13 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
             if (isset($jsonResponse['error_description'])) {
                 $message = $jsonResponse['error_description'];
             }
-            $this->log->error($message, array('response' => $responseBody));
+            $this->log->error($message, ['response' => $responseBody]);
             throw new Exception\SalesforceAuthentication($message);
         }
 
         if (!isset($jsonResponse['access_token']) || empty($jsonResponse['access_token'])) {
             $message = 'Access token not found';
-            $this->log->error($message, array('response' => $responseBody));
+            $this->log->error($message, ['response' => $responseBody]);
             throw new Exception\SalesforceAuthentication($message);
         }
 

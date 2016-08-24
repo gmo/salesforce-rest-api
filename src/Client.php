@@ -17,18 +17,19 @@ class Client implements LoggerAwareInterface
     protected $apiBaseUrl;
     /** @var LoggerInterface */
     protected $log;
-    /** @var  Http\Client */
+    /** @var Http\Client */
     protected $guzzle;
     /** @var AuthenticationInterface */
     protected $authentication;
 
     /**
      * Creates a Salesforce REST API client that uses username-password authentication
+     *
      * @param AuthenticationInterface $authentication
-     * @param Http\Client $guzzle
-     * @param string $apiRegion The region to use for the Salesforce API.  i.e. na5 or cs30
-     * @param string $apiVersion The version of the API to use.  i.e. v31.0
-     * @param LoggerInterface $log
+     * @param Http\Client             $guzzle
+     * @param string                  $apiRegion  The region to use for the Salesforce API.  i.e. na5 or cs30
+     * @param string                  $apiVersion The version of the API to use.  i.e. v31.0
+     * @param LoggerInterface         $log
      */
     public function __construct(
         AuthenticationInterface $authentication,
@@ -37,8 +38,11 @@ class Client implements LoggerAwareInterface
         $apiVersion = 'v31.0',
         LoggerInterface $log = null
     ) {
-        $this->apiBaseUrl = str_replace(array('{region}', '{version}'), array($apiRegion, $apiVersion),
-            static::SALESFORCE_API_URL_PATTERN);
+        $this->apiBaseUrl = str_replace(
+            ['{region}', '{version}'],
+            [$apiRegion, $apiVersion],
+            static::SALESFORCE_API_URL_PATTERN
+        );
         $this->log = $log ?: new NullLogger();
         $this->authentication = $authentication;
         $this->guzzle = $guzzle;
@@ -47,12 +51,14 @@ class Client implements LoggerAwareInterface
 
     /**
      * Makes a call to the QueryAll API
+     *
      * @param string $queryToRun
-     * @param array $parameters Parameters to bind
+     * @param array  $parameters Parameters to bind
+     *
      * @return QueryIterator
      * @throws Exception\SalesforceNoResults
      */
-    public function queryAll($queryToRun, $parameters = array())
+    public function queryAll($queryToRun, $parameters = [])
     {
         $apiPath = $this->buildApiPathForQuery('queryAll', $queryToRun, $parameters);
         $queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
@@ -63,10 +69,11 @@ class Client implements LoggerAwareInterface
     /**
      * @param string $queryMethod
      * @param string $queryToRun
-     * @param array $parameters
+     * @param array  $parameters
+     *
      * @return string
      */
-    protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = array())
+    protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = [])
     {
         if (!empty($parameters)) {
             $queryToRun = $this->bindParameters($queryToRun, $parameters);
@@ -79,15 +86,20 @@ class Client implements LoggerAwareInterface
 
     /**
      * @param string $queryString
-     * @param array $parameters
+     * @param array  $parameters
+     *
      * @return string
      */
     protected function bindParameters($queryString, $parameters)
     {
         $paramKeys = array_keys($parameters);
-        $isNumericIndexes = array_reduce(array_map('is_int', $paramKeys), function ($carry, $item) {
-            return $carry && $item;
-        }, true);
+        $isNumericIndexes = array_reduce(
+            array_map('is_int', $paramKeys),
+            function ($carry, $item) {
+                return $carry && $item;
+            },
+            true
+        );
 
         if ($isNumericIndexes) {
             $searchArray = array_fill(0, count($paramKeys), '?');
@@ -95,9 +107,12 @@ class Client implements LoggerAwareInterface
         } else {
             // NOTE: krsort here will prevent the scenario of a replacement of array('foo' => 1, 'foobar' => 2) on string "Hi :foobar" resulting in "Hi 1bar"
             krsort($parameters);
-            $searchArray = array_map(function ($string) {
-                return ':' . $string;
-            }, array_keys($parameters));
+            $searchArray = array_map(
+                function ($string) {
+                    return ':' . $string;
+                },
+                array_keys($parameters)
+            );
             $replaceArray = array_values($parameters);
         }
 
@@ -126,20 +141,25 @@ class Client implements LoggerAwareInterface
 
     protected function replaceBooleansWithStringLiterals($replacements)
     {
-        return array_map(function ($val) {
-            if (!is_bool($val)) {
-                return $val;
-            }
+        return array_map(
+            function ($val) {
+                if (!is_bool($val)) {
+                    return $val;
+                }
 
-            $retval = $val ? 'true' : 'false';
+                $retval = $val ? 'true' : 'false';
 
-            return $retval;
-        }, $replacements);
+                return $retval;
+            },
+            $replacements
+        );
     }
 
     /**
      * Call the API for the provided query API path, handle No Results, and return a QueryResults object
+     *
      * @param $apiPath
+     *
      * @return QueryResults
      * @throws Exception\SalesforceNoResults
      */
@@ -150,7 +170,7 @@ class Client implements LoggerAwareInterface
 
         if (!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
             $message = 'No results found';
-            $this->log->info($message, array('response' => $response));
+            $this->log->info($message, ['response' => $response]);
             throw new Exception\SalesforceNoResults($message);
         }
 
@@ -162,7 +182,7 @@ class Client implements LoggerAwareInterface
         );
     }
 
-    protected function get($path, $headers = array(), $body = null, $options = array())
+    protected function get($path, $headers = [], $body = null, $options = [])
     {
         return $this->requestWithAutomaticReauthorize('GET', $path, $headers, $body, $options);
     }
@@ -170,9 +190,9 @@ class Client implements LoggerAwareInterface
     protected function requestWithAutomaticReauthorize(
         $type,
         $path,
-        $headers = array(),
+        $headers = [],
         $body = null,
-        $options = array()
+        $options = []
     ) {
         try {
             return $this->request($type, $path, $headers, $body, $options);
@@ -184,7 +204,7 @@ class Client implements LoggerAwareInterface
         }
     }
 
-    protected function request($type, $path, $headers = array(), $body = null, $options = array())
+    protected function request($type, $path, $headers = [], $body = null, $options = [])
     {
         $this->initializeGuzzle();
         $request = $this->guzzle->createRequest($type, $path, $headers, $body, $options);
@@ -203,14 +223,14 @@ class Client implements LoggerAwareInterface
                 $message = $jsonResponse[0]['message'];
             }
 
-            $fields = array();
+            $fields = [];
             if (isset($jsonResponse[0]) && isset($jsonResponse[0]['fields'])) {
                 $fields = $jsonResponse[0]['fields'];
             }
-            $this->log->error($message, array(
+            $this->log->error($message, [
                 'response' => $responseBody,
-                'fields' => $fields,
-            ));
+                'fields'   => $fields,
+            ]);
 
             throw $this->getExceptionForSalesforceError($message, $errorCode, $fields);
         }
@@ -238,8 +258,9 @@ class Client implements LoggerAwareInterface
 
     /**
      * @param string $message
-     * @param int $code
-     * @param array $fields
+     * @param int    $code
+     * @param array  $fields
+     *
      * @return Exception\Salesforce
      */
     protected function getExceptionForSalesforceError($message, $code, $fields)
@@ -269,7 +290,9 @@ class Client implements LoggerAwareInterface
 
     /**
      * Fetch the next QueryResults for a query that has multiple pages worth of returned records
+     *
      * @param QueryResults $queryResults
+     *
      * @return QueryResults
      * @throws Exception\SalesforceNoResults
      */
@@ -290,7 +313,9 @@ class Client implements LoggerAwareInterface
 
     /**
      * Get a record Id via a call to the Query API
+     *
      * @param $queryString
+     *
      * @return string The Id field of the first result of the query
      * @throws Exception\SalesforceNoResults
      */
@@ -303,12 +328,14 @@ class Client implements LoggerAwareInterface
 
     /**
      * Makes a call to the Query API
+     *
      * @param string $queryToRun
-     * @param array $parameters Parameters to bind
+     * @param array  $parameters Parameters to bind
+     *
      * @return QueryIterator
      * @throws Exception\SalesforceNoResults
      */
-    public function query($queryToRun, $parameters = array())
+    public function query($queryToRun, $parameters = [])
     {
         $apiPath = $this->buildApiPathForQuery('query', $queryToRun, $parameters);
         $queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
@@ -318,15 +345,17 @@ class Client implements LoggerAwareInterface
 
     /**
      * Get an Account by Account Id
-     * @param string $accountId
+     *
+     * @param string        $accountId
      * @param string[]|null $fields The Account fields to return. Default Name & BillingCountry
+     *
      * @return mixed The API output, converted from JSON to an associative array
      * @throws Exception\SalesforceNoResults
      */
     public function getAccount($accountId, $fields = null)
     {
         $accountId = urlencode($accountId);
-        $defaultFields = array('Name', 'BillingCountry');
+        $defaultFields = ['Name', 'BillingCountry'];
         if (empty($fields)) {
             $fields = $defaultFields;
         }
@@ -336,7 +365,7 @@ class Client implements LoggerAwareInterface
 
         if (!isset($jsonResponse['attributes']) || empty($jsonResponse['attributes'])) {
             $message = 'No results found';
-            $this->log->info($message, array('response' => $response));
+            $this->log->info($message, ['response' => $response]);
             throw new Exception\SalesforceNoResults($message);
         }
 
@@ -345,15 +374,17 @@ class Client implements LoggerAwareInterface
 
     /**
      * Get a Contact by Account Id
-     * @param string $accountId
+     *
+     * @param string        $accountId
      * @param string[]|null $fields The Contact fields to return. Default FirstName, LastName and MailingCountry
+     *
      * @return mixed The API output, converted from JSON to an associative array
      * @throws Exception\SalesforceNoResults
      */
     public function getContact($accountId, $fields = null)
     {
         $accountId = urlencode($accountId);
-        $defaultFields = array('FirstName', 'LastName', 'MailingCountry');
+        $defaultFields = ['FirstName', 'LastName', 'MailingCountry'];
         if (empty($fields)) {
             $fields = $defaultFields;
         }
@@ -363,7 +394,7 @@ class Client implements LoggerAwareInterface
 
         if (!isset($jsonResponse['attributes']) || empty($jsonResponse['attributes'])) {
             $message = 'No results found';
-            $this->log->info($message, array('response' => $response));
+            $this->log->info($message, ['response' => $response]);
             throw new Exception\SalesforceNoResults($message);
         }
 
@@ -372,7 +403,9 @@ class Client implements LoggerAwareInterface
 
     /**
      * Creates a new Account using the provided field values
+     *
      * @param string[] $fields The field values to set on the new Account
+     *
      * @return string The Id of the newly created Account
      * @throws Exception\Salesforce
      */
@@ -383,42 +416,46 @@ class Client implements LoggerAwareInterface
 
     /**
      * Creates a new Salesforce Object using the provided field values
-     * @param string $object The name of the salesforce object.  i.e. Account or Contact
+     *
+     * @param string   $object The name of the salesforce object.  i.e. Account or Contact
      * @param string[] $fields The field values to set on the new Salesforce Object
+     *
      * @return string The Id of the newly created Salesforce Object
      * @throws Exception\Salesforce
      */
     public function newSalesforceObject($object, $fields)
     {
-        $this->log->info('Creating Salesforce object', array(
+        $this->log->info('Creating Salesforce object', [
             'object' => $object,
             'fields' => $fields,
-        ));
+        ]);
         $fields = json_encode($fields);
-        $headers = array(
-            'Content-Type' => 'application/json'
-        );
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
 
         $response = $this->post("sobjects/{$object}/", $headers, $fields);
         $jsonResponse = json_decode($response, true);
 
         if (!isset($jsonResponse['id']) || empty($jsonResponse['id'])) {
             $message = 'Error while creating account';
-            $this->log->info($message, array('response' => $response));
+            $this->log->info($message, ['response' => $response]);
             throw new Exception\Salesforce($message);
         }
 
         return $jsonResponse['id'];
     }
 
-    protected function post($path, $headers = array(), $body = null, $options = array())
+    protected function post($path, $headers = [], $body = null, $options = [])
     {
         return $this->requestWithAutomaticReauthorize('POST', $path, $headers, $body, $options);
     }
 
     /**
      * Creates a new Contact using the provided field values
+     *
      * @param string[] $fields The field values to set on the new Contact
+     *
      * @return string The Id of the newly created Contact
      * @throws Exception\Salesforce
      */
@@ -429,8 +466,10 @@ class Client implements LoggerAwareInterface
 
     /**
      * Updates an Account using the provided field values
-     * @param string $id The Account Id of the Account to update
+     *
+     * @param string   $id     The Account Id of the Account to update
      * @param string[] $fields The fields to update
+     *
      * @return bool
      */
     public function updateAccount($id, $fields)
@@ -440,37 +479,44 @@ class Client implements LoggerAwareInterface
 
     /**
      * Updates an Salesforce Object using the provided field values
-     * @param string $object The name of the salesforce object.  i.e. Account or Contact
-     * @param string $id The Id of the Salesforce Object to update
+     *
+     * @param string   $object The name of the salesforce object.  i.e. Account or Contact
+     * @param string   $id     The Id of the Salesforce Object to update
      * @param string[] $fields The fields to update
+     *
      * @return bool
      */
     public function updateSalesforceObject($object, $id, $fields)
     {
-        $this->log->info('Updating Salesforce object', array(
-            'id' => $id,
-            'object' => $object,
-        ));
+        $this->log->info(
+            'Updating Salesforce object',
+            [
+                'id'     => $id,
+                'object' => $object,
+            ]
+        );
         $id = urlencode($id);
         $fields = json_encode($fields);
-        $headers = array(
-            'Content-Type' => 'application/json'
-        );
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
 
         $this->patch("sobjects/{$object}/{$id}", $headers, $fields);
 
         return true;
     }
 
-    protected function patch($path, $headers = array(), $body = null, $options = array())
+    protected function patch($path, $headers = [], $body = null, $options = [])
     {
         return $this->requestWithAutomaticReauthorize('PATCH', $path, $headers, $body, $options);
     }
 
     /**
      * Updates an Contact using the provided field values
-     * @param string $id The Contact Id of the Contact to update
+     *
+     * @param string   $id     The Contact Id of the Contact to update
      * @param string[] $fields The fields to update
+     *
      * @return bool
      */
     public function updateContact($id, $fields)
@@ -480,6 +526,7 @@ class Client implements LoggerAwareInterface
 
     /**
      * Gets the valid fields for Accounts via the describe API
+     *
      * @return mixed The API output, converted from JSON to an associative array
      */
     public function getAccountFields()
@@ -489,16 +536,18 @@ class Client implements LoggerAwareInterface
 
     /**
      * Gets the valid fields for a given Salesforce Object via the describe API
+     *
      * @param string $object The name of the salesforce object.  i.e. Account or Contact
+     *
      * @return mixed The API output, converted from JSON to an associative array
      */
     public function getFields($object)
     {
         $response = $this->get("sobjects/{$object}/describe");
         $jsonResponse = json_decode($response, true);
-        $fields = array();
+        $fields = [];
         foreach ($jsonResponse['fields'] as $row) {
-            $fields[] = array('label' => $row['label'], 'name' => $row['name']);
+            $fields[] = ['label' => $row['label'], 'name' => $row['name']];
         }
 
         return $fields;
@@ -506,6 +555,7 @@ class Client implements LoggerAwareInterface
 
     /**
      * Gets the valid fields for Contacts via the describe API
+     *
      * @return mixed The API output, converted from JSON to an associative array
      */
     public function getContactFields()
