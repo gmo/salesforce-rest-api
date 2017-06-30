@@ -194,7 +194,7 @@ class Client implements LoggerAwareInterface
     protected function request(string $type, string $path, array $headers = [], $body = null)
     {
         $this->initialize();
-var_dump($path);
+
         $options = [
             'headers' => array_merge($headers, $this->httpHeader),
             'form_params' => $body
@@ -210,7 +210,6 @@ var_dump($path);
         } catch (BadResponseException $e) {
             $response = $e->getResponse();
             $message = $responseBody = $response->getBody()->getContents();
-            var_dump($message);die;
             $errorCode = $response->getStatusCode();
 
             $jsonResponse = json_decode($responseBody, true);
