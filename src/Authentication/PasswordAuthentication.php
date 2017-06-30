@@ -1,17 +1,18 @@
 <?php
 namespace Gmo\Salesforce\Authentication;
 
-use Guzzle\Http;
+use Gmo\Salesforce\AccessToken;
+use GuzzleHttp;
 use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerAwareTrait;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Gmo\Salesforce\Exception;
 
 class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInterface
 {
+    use LoggerAwareTrait;
 
-    /** @var LoggerInterface */
-    protected $log;
     /** @var string */
     protected $clientId;
     /** @var string */
@@ -24,7 +25,7 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
     protected $securityToken;
     /** @var string */
     protected $accessToken;
-    /** @var Http\Client */
+    /** @var GuzzleHttp\Client */
     private $guzzle;
 
     public function __construct(
@@ -33,18 +34,18 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
         $username,
         $password,
         $securityToken,
-        Http\Client $guzzle,
-        LoggerInterface $log = null,
-        $loginApiUrl = "https://login.salesforce.com/services/"
+        LoggerInterface $logger = null,
+        $loginApiUrl = 'https://login.salesforce.com/services/'
     ) {
-        $this->log = $log ?: new NullLogger();
         $this->clientId = $clientId;
         $this->clientSecret = $clientSecret;
         $this->username = $username;
         $this->password = $password;
         $this->securityToken = $securityToken;
-        $this->guzzle = $guzzle;
-        $this->guzzle->setBaseUrl($loginApiUrl);
+        $this->guzzle = new GuzzleHttp\Client([
+            'base_uri' => $loginApiUrl,
+        ]);
+        $this->setLogger($logger ?: new NullLogger());
     }
 
     /**
@@ -52,39 +53,9 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
      */
     public function getAccessToken()
     {
-        if ($this->accessToken) {
-            return $this->accessToken;
+        if (!$this->accessToken) {
+            $this->accessToken = $this->fetchAccessToken();
         }
-
-        $postFields = [
-            'grant_type'    => 'password',
-            'client_id'     => $this->clientId,
-            'client_secret' => $this->clientSecret,
-            'username'      => $this->username,
-            'password'      => $this->password . $this->securityToken,
-        ];
-        $request = $this->guzzle->post('oauth2/token', null, $postFields);
-        $request->setAuth('user', 'pass');
-        $response = $request->send();
-        $responseBody = $response->getBody();
-        $jsonResponse = json_decode($responseBody, true);
-
-        if ($response->getStatusCode() !== 200) {
-            $message = $responseBody;
-            if (isset($jsonResponse['error_description'])) {
-                $message = $jsonResponse['error_description'];
-            }
-            $this->log->error($message, ['response' => $responseBody]);
-            throw new Exception\SalesforceAuthentication($message);
-        }
-
-        if (!isset($jsonResponse['access_token']) || empty($jsonResponse['access_token'])) {
-            $message = 'Access token not found';
-            $this->log->error($message, ['response' => $responseBody]);
-            throw new Exception\SalesforceAuthentication($message);
-        }
-
-        $this->accessToken = $jsonResponse['access_token'];
 
         return $this->accessToken;
     }
@@ -94,12 +65,50 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
         $this->accessToken = null;
     }
 
-    /**
-     * @inheritdoc
-     */
-    public function setLogger(LoggerInterface $logger)
+    protected function fetchAccessToken()
     {
-        $this->log = $logger;
-    }
+        $response = $this->guzzle->post('oauth2/token', [
+            'auth'        => ['user', 'pass'],
+            'http_errors' => false,
+            'form_params' => [
+                'grant_type'    => 'password',
+                'client_id'     => $this->clientId,
+                'client_secret' => $this->clientSecret,
+                'username'      => $this->username,
+                'password'      => $this->password . $this->securityToken,
+            ],
+        ]);
+        $body = (string) $response->getBody();
+        $json = json_decode($body, true);
 
+        if ($response->getStatusCode() !== 200) {
+            $message = isset($json['error_description']) ? $json['error_description'] : $body;
+            $this->logger->error($message, ['response' => $body]);
+            throw new Exception\SalesforceAuthentication($message);
+        }
+
+        if (!isset($json['access_token']) || empty($json['access_token'])) {
+            $message = 'Access token not found';
+            $this->logger->error($message, ['response' => $body]);
+            throw new Exception\SalesforceAuthentication($message);
+        }
+
+        $issued = (new \DateTime(null))->setTimestamp((int) ($json['issued_at'] / 1000));
+        $expires = clone $issued;
+        $expires->modify('+1 hour -5 minutes');
+
+        $token = new AccessToken(
+            $json['id'],
+            $issued,
+            $expires,
+            $json['token_type'],
+            $json['access_token'],
+            $json['signature'],
+            $json['instance_url'],
+            isset($json['scope']) ? $json['scope'] : null,
+            isset($json['refresh_token']) ? $json['refresh_token'] : null
+        );
+
+        return $token;
+    }
 }

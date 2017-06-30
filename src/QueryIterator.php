@@ -1,92 +1,53 @@
 <?php
 namespace Gmo\Salesforce;
 
-class QueryIterator implements \Iterator, \Countable
+use GuzzleHttp\Psr7\Uri;
+use JmesPath\Env as JmesPath;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\UriInterface;
+
+class QueryIterator implements \Countable, \Iterator
 {
-    /** @var Client */
+    /** @var BasicClient */
     protected $client;
-    /** @var QueryResults */
-    protected $currentResultsSet;
-    /** @var QueryResults */
-    protected $firstResultsSet;
-    /** @var bool */
-    protected $valid;
+    /** @var RequestInterface */
+    protected $firstRequest;
+    /** @var RequestInterface */
+    protected $request;
     /** @var int */
-    protected $position;
+    protected $totalSize;
+    /** @var UriInterface|null */
+    protected $nextPageUri;
+
+    protected $fetched = false;
+    protected $records = [];
+
+    /** @var int */
+    protected $position = -1;
 
     /**
-     * @param Client $client Client connected to Redis.
-     * @param QueryResults $firstResultsSet
+     * @param BasicClient  $client
+     * @param RequestInterface $request
      */
-    public function __construct(Client $client, QueryResults $firstResultsSet)
+    public function __construct(BasicClient $client, RequestInterface $request)
     {
         $this->client = $client;
+        $this->request = $this->firstRequest = $request;
+    }
 
-        $this->firstResultsSet = $firstResultsSet;
-        $this->currentResultsSet = $firstResultsSet;
-        $this->rewind();
+    public function search($expression)
+    {
+        foreach ($this as $record) {
+            yield JmesPath::search($expression, $record);
+        }
     }
 
     /**
      * {@inheritdoc}
      */
-    public function rewind()
+    public function valid()
     {
-        $this->reset();
-        $this->next();
-    }
-
-    /**
-     * Resets the inner state of the iterator.
-     */
-    protected function reset()
-    {
-        $this->valid = true;
-        $this->position = -1;
-        $this->currentResultsSet = $this->firstResultsSet;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function next()
-    {
-        $results = $this->currentResultsSet->getResults();
-        if (++$this->position < count($results)) {
-            return;
-        }
-
-        if ($this->currentResultsSet->isDone()) {
-            $this->valid = false;
-
-            return;
-        }
-
-        $this->currentResultsSet = $this->getNextResultsSet();
-        $this->position = 0;
-    }
-
-    /**
-     * Gets the next results set
-     * @return QueryResults
-     * @throws Exception\SalesforceNoResults
-     */
-    protected function getNextResultsSet()
-    {
-        try {
-            return $this->client->getNextQueryResults($this->currentResultsSet);
-        } catch (Exception\SalesforceNoResults $e) {
-            return new QueryResults(array(), $this->firstResultsSet->getTotalSize(), true, null);
-        }
-    }
-
-    /**
-     * Returns the current QueryResults object being iterated
-     * @return QueryResults
-     */
-    public function getCurrentResultsSet()
-    {
-        return $this->currentResultsSet;
+        return isset($this->records[$this->position]);
     }
 
     /**
@@ -94,9 +55,7 @@ class QueryIterator implements \Iterator, \Countable
      */
     public function current()
     {
-        $results = $this->currentResultsSet->getResults();
-
-        return $results[$this->position];
+        return $this->records[$this->position];
     }
 
     /**
@@ -110,9 +69,52 @@ class QueryIterator implements \Iterator, \Countable
     /**
      * {@inheritdoc}
      */
-    public function valid()
+    public function next()
     {
-        return $this->valid;
+        $this->fetch();
+
+        if (++$this->position < count($this->records)) {
+            return;
+        }
+
+        if (!$this->nextPageUri) {
+            $this->position = -1;
+            return;
+        }
+
+        // Fetch next
+        $this->request = $this->request->withUri($this->nextPageUri);
+        $this->fetched = false;
+        $this->fetch();
+        $this->position = 0;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function rewind()
+    {
+        $this->position = -1;
+        $this->request = $this->firstRequest;
+        $this->fetched = false;
+        $this->next();
+    }
+
+    protected function fetch()
+    {
+        if (!$this->fetched) {
+            $this->doFetch();
+            $this->fetched = true;
+        }
+    }
+
+    protected function doFetch()
+    {
+        $result = $this->client->fetchRequest($this->request);
+
+        $this->records = $result->get('records', []);
+        $this->totalSize = $result->get('totalSize', 0);
+        $this->nextPageUri = $result->has('nextRecordsUrl') ? new Uri($result['nextRecordsUrl']) : null;
     }
 
     /**
@@ -120,7 +122,7 @@ class QueryIterator implements \Iterator, \Countable
      */
     public function count()
     {
-        return $this->currentResultsSet->getTotalSize();
+        $this->fetch();
+        return $this->totalSize;
     }
-
 }

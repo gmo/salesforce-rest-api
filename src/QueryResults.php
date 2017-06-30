@@ -5,8 +5,11 @@ class QueryResults
 {
     /** @var array */
     protected $results;
+    /** @var int */
     protected $totalSize;
+    /** @var bool */
     protected $isDone;
+    /** @var string|null */
     protected $nextQuery;
 
     public function __construct(array $results, $totalSize, $isDone, $nextQuery)
