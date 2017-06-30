@@ -1,48 +1,59 @@
 <?php
+declare(strict_types=1);
+
 namespace Gmo\Salesforce;
 
+use Doctrine\Common\Collections\ArrayCollection;
 use Gmo\Salesforce\Authentication\AuthenticationInterface;
 use Gmo\Salesforce\Exception;
-use Guzzle\Http;
-use Guzzle\Http\Exception\ClientErrorResponseException;
+use Gmo\Salesforce\Sobject\Field;
+use Gmo\Salesforce\Sobject\Sobject;
+use GuzzleHttp as Http;
+use GuzzleHttp\Exception\BadResponseException;
+use MongoDB\Driver\Query;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 class Client implements LoggerAwareInterface
 {
+    const SALESFORCE_API_URL = '/services/data/';
+    const SALESFORCE_DESCRIBE_PATTERN = '/sobjects/%s/describe';
+    const SALESFORCE_SOBJECTS = '/sobjects';
+    const SALESFORCE_POST_PATTERN = '/sobjects/%s';
+    const SALESFORCE_PATCH_PATTERN = '/sobjects/%s/%s';
 
-    const SALESFORCE_API_URL_PATTERN = 'https://{region}.salesforce.com/services/data/{version}/';
-    /** @var string */
-    protected $apiBaseUrl;
+    const SALESFORCE_QUERY = '/query';
+    const SALESFORCE_QUERYALL = '/queryAll';
+
     /** @var LoggerInterface */
     protected $log;
     /** @var  Http\Client */
-    protected $guzzle;
+    protected $http;
     /** @var AuthenticationInterface */
     protected $authentication;
+    /** @var string */
+    protected $apiVersion;
+    /** @var array */
+    protected $httpHeader;
 
     /**
      * Creates a Salesforce REST API client that uses username-password authentication
      * @param AuthenticationInterface $authentication
-     * @param Http\Client $guzzle
-     * @param string $apiRegion The region to use for the Salesforce API.  i.e. na5 or cs30
+     * @param Http\ClientInterface $guzzle
      * @param string $apiVersion The version of the API to use.  i.e. v31.0
      * @param LoggerInterface $log
      */
     public function __construct(
         AuthenticationInterface $authentication,
-        Http\Client $guzzle,
-        $apiRegion,
-        $apiVersion = 'v31.0',
+        Http\ClientInterface $guzzle = null,
+        string $apiVersion = 'last',
         LoggerInterface $log = null
     ) {
-        $this->apiBaseUrl = str_replace(array('{region}', '{version}'), array($apiRegion, $apiVersion),
-            static::SALESFORCE_API_URL_PATTERN);
-        $this->log = $log ?: new NullLogger();
+        $this->log = $log ?? new NullLogger();
+        $this->apiVersion = $apiVersion;
         $this->authentication = $authentication;
-        $this->guzzle = $guzzle;
-        $this->guzzle->setBaseUrl($this->apiBaseUrl);
+        $this->http = $guzzle?? new Http\Client();
     }
 
     /**
@@ -52,9 +63,9 @@ class Client implements LoggerAwareInterface
      * @return QueryIterator
      * @throws Exception\SalesforceNoResults
      */
-    public function queryAll($queryToRun, $parameters = array())
+    public function queryAll(string $queryToRun, array $parameters = []): QueryIterator
     {
-        $apiPath = $this->buildApiPathForQuery('queryAll', $queryToRun, $parameters);
+        $apiPath = $this->buildApiPathForQuery(self::SALESFORCE_QUERYALL, $queryToRun, $parameters);
         $queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
 
         return new QueryIterator($this, $queryResults);
@@ -66,7 +77,7 @@ class Client implements LoggerAwareInterface
      * @param array $parameters
      * @return string
      */
-    protected function buildApiPathForQuery($queryMethod, $queryToRun, $parameters = array())
+    protected function buildApiPathForQuery(string $queryMethod, string $queryToRun, array $parameters = []): string
     {
         if (!empty($parameters)) {
             $queryToRun = $this->bindParameters($queryToRun, $parameters);
@@ -74,7 +85,7 @@ class Client implements LoggerAwareInterface
 
         $queryToRun = urlencode($queryToRun);
 
-        return "{$queryMethod}/?q={$queryToRun}";
+        return '/' . $queryMethod .  '/?q=' . $queryToRun;
     }
 
     /**
@@ -82,7 +93,7 @@ class Client implements LoggerAwareInterface
      * @param array $parameters
      * @return string
      */
-    protected function bindParameters($queryString, $parameters)
+    protected function bindParameters(string $queryString, array $parameters): string
     {
         $paramKeys = array_keys($parameters);
         $isNumericIndexes = array_reduce(array_map('is_int', $paramKeys), function ($carry, $item) {
@@ -107,12 +118,12 @@ class Client implements LoggerAwareInterface
         return str_replace($searchArray, $replaceArray, $queryString);
     }
 
-    protected function addQuotesToStringReplacements($replacements)
+    protected function addQuotesToStringReplacements(array $replacements): array
     {
         foreach ($replacements as $key => $val) {
             if (is_string($val) && !$this->isSalesforceDateFormat($val)) {
-                $val = str_replace("'", "\'", $val);
-                $replacements[$key] = "'{$val}'";
+                $val = str_replace('\'', '\\\'', $val);
+                $replacements[$key] = '\'' . $val . '\'';
             }
         }
 
@@ -124,16 +135,13 @@ class Client implements LoggerAwareInterface
         return preg_match('/\d+[-]\d+[-]\d+[T]\d+[:]\d+[:]\d+[Z]/', $string) === 1;
     }
 
-    protected function replaceBooleansWithStringLiterals($replacements)
+    protected function replaceBooleansWithStringLiterals(array $replacements): array
     {
         return array_map(function ($val) {
             if (!is_bool($val)) {
                 return $val;
             }
-
-            $retval = $val ? 'true' : 'false';
-
-            return $retval;
+            return $val ? 'true' : 'false';
         }, $replacements);
     }
 
@@ -145,7 +153,7 @@ class Client implements LoggerAwareInterface
      */
     protected function callQueryApiAndGetQueryResults($apiPath)
     {
-        $response = $this->get($apiPath);
+        $response = $this->get($this->getUrl($apiPath));
         $jsonResponse = json_decode($response, true);
 
         if (!isset($jsonResponse['totalSize']) || empty($jsonResponse['totalSize'])) {
@@ -162,40 +170,47 @@ class Client implements LoggerAwareInterface
         );
     }
 
-    protected function get($path, $headers = array(), $body = null, $options = array())
+    protected function get(string $url = '')
     {
-        return $this->requestWithAutomaticReauthorize('GET', $path, $headers, $body, $options);
+        return $this->requestWithAutomaticReauthorize('GET', $url);
     }
 
     protected function requestWithAutomaticReauthorize(
-        $type,
-        $path,
-        $headers = array(),
-        $body = null,
-        $options = array()
+        string $type,
+        string $path,
+        array $headers = [],
+        $body = null
     ) {
         try {
-            return $this->request($type, $path, $headers, $body, $options);
+            return $this->request($type, $path, $headers, $body);
         } catch (Exception\SessionExpired $e) {
             $this->authentication->invalidateAccessToken();
-            $this->setAccessTokenInGuzzleFromAuthentication();
+            $this->populateToken();
 
-            return $this->request($type, $path, $headers, $body, $options);
+            return $this->request($type, $path, $headers, $body);
         }
     }
 
-    protected function request($type, $path, $headers = array(), $body = null, $options = array())
+    protected function request(string $type, string $path, array $headers = [], $body = null)
     {
-        $this->initializeGuzzle();
-        $request = $this->guzzle->createRequest($type, $path, $headers, $body, $options);
-        try {
-            $response = $request->send();
-            $responseBody = $response->getBody();
+        $this->initialize();
+var_dump($path);
+        $options = [
+            'headers' => array_merge($headers, $this->httpHeader),
+            'form_params' => $body
+        ];
+        if (isset($options['headers']['Content-Type']) && $options['headers']['Content-Type'] === 'application/json') {
+            $options['json'] = $options['form_params'];
+            unset($options['form_params']);
+        }
 
-        } catch (ClientErrorResponseException $e) {
+        try {
+            $request = $this->getHttp()->request($type, $path, $options);
+            $responseBody = $request->getBody()->getContents();
+        } catch (BadResponseException $e) {
             $response = $e->getResponse();
-            $responseBody = $response->getBody();
-            $message = $responseBody;
+            $message = $responseBody = $response->getBody()->getContents();
+            var_dump($message);die;
             $errorCode = $response->getStatusCode();
 
             $jsonResponse = json_decode($responseBody, true);
@@ -203,7 +218,7 @@ class Client implements LoggerAwareInterface
                 $message = $jsonResponse[0]['message'];
             }
 
-            $fields = array();
+            $fields = [];
             if (isset($jsonResponse[0]) && isset($jsonResponse[0]['fields'])) {
                 $fields = $jsonResponse[0]['fields'];
             }
@@ -221,19 +236,19 @@ class Client implements LoggerAwareInterface
     /**
      * Lazy loads the access token by running authentication and setting the access token into the $this->guzzle headers
      */
-    protected function initializeGuzzle()
+    protected function initialize()
     {
-        if ($this->guzzle->getDefaultOption('headers/Authorization')) {
+        if ($this->httpHeader['Authorization']) {
             return;
         }
 
-        $this->setAccessTokenInGuzzleFromAuthentication();
+        $this->populateToken();
     }
 
-    protected function setAccessTokenInGuzzleFromAuthentication()
+    protected function populateToken()
     {
         $accessToken = $this->authentication->getAccessToken();
-        $this->guzzle->setDefaultOption('headers/Authorization', "Bearer {$accessToken}");
+        $this->httpHeader['Authorization'] = $accessToken->getTokenType() . ' ' . $accessToken->getToken();
     }
 
     /**
@@ -275,30 +290,10 @@ class Client implements LoggerAwareInterface
      */
     public function getNextQueryResults(QueryResults $queryResults)
     {
-        $basePath = $this->getPathFromUrl($this->apiBaseUrl);
+        $basePath = parse_url($this->getApiBaseUrl())['path'];
         $nextRecordsRelativePath = str_replace($basePath, '', $queryResults->getNextQuery());
 
         return $this->callQueryApiAndGetQueryResults($nextRecordsRelativePath);
-    }
-
-    protected function getPathFromUrl($url)
-    {
-        $parts = parse_url($url);
-
-        return $parts['path'];
-    }
-
-    /**
-     * Get a record Id via a call to the Query API
-     * @param $queryString
-     * @return string The Id field of the first result of the query
-     * @throws Exception\SalesforceNoResults
-     */
-    public function queryForId($queryString)
-    {
-        $jsonResponse = $this->query($queryString);
-
-        return $jsonResponse['records'][0]['Id'];
     }
 
     /**
@@ -308,77 +303,12 @@ class Client implements LoggerAwareInterface
      * @return QueryIterator
      * @throws Exception\SalesforceNoResults
      */
-    public function query($queryToRun, $parameters = array())
+    public function query($queryToRun, $parameters = [])
     {
         $apiPath = $this->buildApiPathForQuery('query', $queryToRun, $parameters);
         $queryResults = $this->callQueryApiAndGetQueryResults($apiPath);
 
         return new QueryIterator($this, $queryResults);
-    }
-
-    /**
-     * Get an Account by Account Id
-     * @param string $accountId
-     * @param string[]|null $fields The Account fields to return. Default Name & BillingCountry
-     * @return mixed The API output, converted from JSON to an associative array
-     * @throws Exception\SalesforceNoResults
-     */
-    public function getAccount($accountId, $fields = null)
-    {
-        $accountId = urlencode($accountId);
-        $defaultFields = array('Name', 'BillingCountry');
-        if (empty($fields)) {
-            $fields = $defaultFields;
-        }
-        $fields = implode(',', $fields);
-        $response = $this->get("sobjects/Account/{$accountId}?fields={$fields}");
-        $jsonResponse = json_decode($response, true);
-
-        if (!isset($jsonResponse['attributes']) || empty($jsonResponse['attributes'])) {
-            $message = 'No results found';
-            $this->log->info($message, array('response' => $response));
-            throw new Exception\SalesforceNoResults($message);
-        }
-
-        return $jsonResponse;
-    }
-
-    /**
-     * Get a Contact by Account Id
-     * @param string $accountId
-     * @param string[]|null $fields The Contact fields to return. Default FirstName, LastName and MailingCountry
-     * @return mixed The API output, converted from JSON to an associative array
-     * @throws Exception\SalesforceNoResults
-     */
-    public function getContact($accountId, $fields = null)
-    {
-        $accountId = urlencode($accountId);
-        $defaultFields = array('FirstName', 'LastName', 'MailingCountry');
-        if (empty($fields)) {
-            $fields = $defaultFields;
-        }
-        $fields = implode(',', $fields);
-        $response = $this->get("sobjects/Contact/{$accountId}?fields={$fields}");
-        $jsonResponse = json_decode($response, true);
-
-        if (!isset($jsonResponse['attributes']) || empty($jsonResponse['attributes'])) {
-            $message = 'No results found';
-            $this->log->info($message, array('response' => $response));
-            throw new Exception\SalesforceNoResults($message);
-        }
-
-        return $jsonResponse;
-    }
-
-    /**
-     * Creates a new Account using the provided field values
-     * @param string[] $fields The field values to set on the new Account
-     * @return string The Id of the newly created Account
-     * @throws Exception\Salesforce
-     */
-    public function newAccount($fields)
-    {
-        return $this->newSalesforceObject("Account", $fields);
     }
 
     /**
@@ -388,18 +318,13 @@ class Client implements LoggerAwareInterface
      * @return string The Id of the newly created Salesforce Object
      * @throws Exception\Salesforce
      */
-    public function newSalesforceObject($object, $fields)
+    public function create(string $object, array $fields)
     {
-        $this->log->info('Creating Salesforce object', array(
-            'object' => $object,
-            'fields' => $fields,
-        ));
-        $fields = json_encode($fields);
-        $headers = array(
-            'Content-Type' => 'application/json'
-        );
+        $this->log->info('Creating Salesforce object', ['object' => $object, 'fields' => $fields]);
+        $headers = ['Content-Type' => 'application/json'];
 
-        $response = $this->post("sobjects/{$object}/", $headers, $fields);
+        $url = sprintf(self::SALESFORCE_POST_PATTERN, $object);
+        $response = $this->post($this->getUrl($url), $headers, $fields);
         $jsonResponse = json_decode($response, true);
 
         if (!isset($jsonResponse['id']) || empty($jsonResponse['id'])) {
@@ -411,31 +336,9 @@ class Client implements LoggerAwareInterface
         return $jsonResponse['id'];
     }
 
-    protected function post($path, $headers = array(), $body = null, $options = array())
+    protected function post(string $path, array $headers = [], $body = null)
     {
-        return $this->requestWithAutomaticReauthorize('POST', $path, $headers, $body, $options);
-    }
-
-    /**
-     * Creates a new Contact using the provided field values
-     * @param string[] $fields The field values to set on the new Contact
-     * @return string The Id of the newly created Contact
-     * @throws Exception\Salesforce
-     */
-    public function newContact($fields)
-    {
-        return $this->newSalesforceObject("Contact", $fields);
-    }
-
-    /**
-     * Updates an Account using the provided field values
-     * @param string $id The Account Id of the Account to update
-     * @param string[] $fields The fields to update
-     * @return bool
-     */
-    public function updateAccount($id, $fields)
-    {
-        return $this->updateSalesforceObject("Account", $id, $fields);
+        return $this->requestWithAutomaticReauthorize('POST', $path, $headers, $body);
     }
 
     /**
@@ -445,46 +348,34 @@ class Client implements LoggerAwareInterface
      * @param string[] $fields The fields to update
      * @return bool
      */
-    public function updateSalesforceObject($object, $id, $fields)
+    public function update(string $object, string $id, ArrayCollection $fields)
     {
-        $this->log->info('Updating Salesforce object', array(
-            'id' => $id,
-            'object' => $object,
-        ));
+        $this->log->info('Updating Salesforce object', ['id' => $id, 'object' => $object]);
         $id = urlencode($id);
         $fields = json_encode($fields);
-        $headers = array(
-            'Content-Type' => 'application/json'
-        );
+        $headers = ['Content-Type' => 'application/json'];
 
-        $this->patch("sobjects/{$object}/{$id}", $headers, $fields);
+        $url = sprintf(self::SALESFORCE_PATCH_PATTERN, $object, $id);
+        $this->patch($this->getUrl($url), $headers, $fields);
 
         return true;
     }
 
-    protected function patch($path, $headers = array(), $body = null, $options = array())
+    protected function patch(string $url, array $headers = [], string $body = null)
     {
-        return $this->requestWithAutomaticReauthorize('PATCH', $path, $headers, $body, $options);
+        return $this->requestWithAutomaticReauthorize('PATCH', $url, $headers, $body);
     }
 
-    /**
-     * Updates an Contact using the provided field values
-     * @param string $id The Contact Id of the Contact to update
-     * @param string[] $fields The fields to update
-     * @return bool
-     */
-    public function updateContact($id, $fields)
+    public function getSobjects()
     {
-        return $this->updateSalesforceObject("Contact", $id, $fields);
-    }
 
-    /**
-     * Gets the valid fields for Accounts via the describe API
-     * @return mixed The API output, converted from JSON to an associative array
-     */
-    public function getAccountFields()
-    {
-        return $this->getFields('Account');
+        $url = sprintf(self::SALESFORCE_SOBJECTS);
+        $jsonResponse = json_decode($this->get($this->getUrl($url)), true);
+        $fields = new ArrayCollection();
+        foreach ($jsonResponse['sobjects'] as $row) {
+            $fields->add(new Sobject($row));
+        }
+        return $fields;
     }
 
     /**
@@ -492,25 +383,15 @@ class Client implements LoggerAwareInterface
      * @param string $object The name of the salesforce object.  i.e. Account or Contact
      * @return mixed The API output, converted from JSON to an associative array
      */
-    public function getFields($object)
+    public function getFields(string $object): ArrayCollection
     {
-        $response = $this->get("sobjects/{$object}/describe");
-        $jsonResponse = json_decode($response, true);
-        $fields = array();
+        $url = sprintf(self::SALESFORCE_DESCRIBE_PATTERN, $object);
+        $jsonResponse = json_decode($this->get($this->getUrl($url)), true);
+        $fields = new ArrayCollection();
         foreach ($jsonResponse['fields'] as $row) {
-            $fields[] = array('label' => $row['label'], 'name' => $row['name']);
+            $fields->add(new Field($row));
         }
-
         return $fields;
-    }
-
-    /**
-     * Gets the valid fields for Contacts via the describe API
-     * @return mixed The API output, converted from JSON to an associative array
-     */
-    public function getContactFields()
-    {
-        return $this->getFields('Contact');
     }
 
     /**
@@ -519,5 +400,39 @@ class Client implements LoggerAwareInterface
     public function setLogger(LoggerInterface $logger)
     {
         $this->log = $logger;
+    }
+
+    protected function getApiBaseUrl(): string
+    {
+        return $this->authentication->getAccessToken()->getInstanceUrl() .
+            self::SALESFORCE_API_URL .
+            $this->getApiVersion();
+    }
+
+    protected function getUrl(string $url): string
+    {
+        return $this->getApiBaseUrl() . $url;
+    }
+
+    protected function getHttp() : Http\Client
+    {
+        if ('last' === $this->apiVersion) {
+            $this->getApiVersion();
+            $this->http->__construct(['base_uri' => $this->getApiBaseUrl()]);
+        }
+        return $this->http;
+    }
+
+    protected function getApiVersion(): string
+    {
+        if ('last' !== $this->apiVersion) {
+            return $this->apiVersion;
+        }
+        $this->http->__construct([
+            'base_uri' => $this->authentication->getAccessToken()->getInstanceUrl() . self::SALESFORCE_API_URL
+        ]);
+        $versions = json_decode($this->http->get('')->getBody()->getContents(), true);
+        $this->apiVersion = 'v' . end($versions)['version'];
+        return $this->apiVersion;
     }
 }

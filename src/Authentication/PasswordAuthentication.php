@@ -1,7 +1,9 @@
 <?php
+declare(strict_types=1);
+
 namespace Gmo\Salesforce\Authentication;
 
-use Guzzle\Http;
+use GuzzleHttp as Http;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -9,6 +11,16 @@ use Gmo\Salesforce\Exception;
 
 class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInterface
 {
+    const SALESFORCE_SANDBOX_LOGIN_URL = 'https://test.salesforce.com/';
+
+    const SALESFORCE_LOGIN_URL = 'https://login.salesforce.com/';
+
+    const LOGIN_INSTANCES = [
+        self::SALESFORCE_SANDBOX_LOGIN_URL,
+        self::SALESFORCE_LOGIN_URL
+    ];
+
+    const LOGIN_URL = '/services/oauth2/token';
 
     /** @var LoggerInterface */
     protected $log;
@@ -20,53 +32,43 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
     protected $username;
     /** @var string */
     protected $password;
-    /** @var string */
-    protected $securityToken;
-    /** @var string */
-    protected $accessToken;
-    /** @var Http\Client */
-    private $guzzle;
+    /** @var AuthenticationBagInterface|null */
+    protected $responseBag;
+    /** @var Http\ClientInterface */
+    private $http;
 
     public function __construct(
         $clientId,
         $clientSecret,
         $username,
         $password,
-        $securityToken,
-        Http\Client $guzzle,
-        LoggerInterface $log = null,
-        $loginApiUrl = "https://login.salesforce.com/services/"
+        $loginApiUrl = self::SALESFORCE_SANDBOX_LOGIN_URL,
+        Http\ClientInterface $guzzle = null,
+        LoggerInterface $log = null
     ) {
         $this->log = $log ?: new NullLogger();
         $this->clientId = $clientId;
         $this->clientSecret = $clientSecret;
         $this->username = $username;
         $this->password = $password;
-        $this->securityToken = $securityToken;
-        $this->guzzle = $guzzle;
-        $this->guzzle->setBaseUrl($loginApiUrl);
+        $this->http = $guzzle ?? new Http\Client(['base_uri' => $loginApiUrl]);
     }
 
-    /**
-     * @inheritdoc
-     */
-    public function getAccessToken()
+    public function getAccessToken(): AuthenticationBagInterface
     {
-        if ($this->accessToken) {
-            return $this->accessToken;
+        if ($this->responseBag) {
+            return $this->responseBag;
         }
 
-        $postFields = array(
+        $postFields = [
             'grant_type' => 'password',
             'client_id' => $this->clientId,
             'client_secret' => $this->clientSecret,
             'username' => $this->username,
-            'password' => $this->password . $this->securityToken,
-        );
-        $request = $this->guzzle->post('oauth2/token', null, $postFields);
-        $request->setAuth('user', 'pass');
-        $response = $request->send();
-        $responseBody = $response->getBody();
+            'password' => $this->password,
+        ];
+        $response = $this->http->post(self::LOGIN_URL, ['form_params' => $postFields]);
+        $responseBody = $response->getBody()->getContents();
         $jsonResponse = json_decode($responseBody, true);
 
         if ($response->getStatusCode() !== 200) {
@@ -84,14 +86,14 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
             throw new Exception\SalesforceAuthentication($message);
         }
 
-        $this->accessToken = $jsonResponse['access_token'];
+        $this->responseBag = new AuthenticationBag($jsonResponse);
 
-        return $this->accessToken;
+        return $this->responseBag;
     }
 
     public function invalidateAccessToken()
     {
-        $this->accessToken = null;
+        $this->responseBag = null;
     }
 
     /**
