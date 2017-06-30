@@ -47,10 +47,9 @@ class Client implements LoggerAwareInterface
     public function __construct(
         AuthenticationInterface $authentication,
         Http\ClientInterface $guzzle = null,
-        string $apiVersion = 'last',
-        LoggerInterface $log = null
+        string $apiVersion = 'last'
     ) {
-        $this->log = $log ?? new NullLogger();
+        $this->log = new NullLogger();
         $this->apiVersion = $apiVersion;
         $this->authentication = $authentication;
         $this->http = $guzzle?? new Http\Client();

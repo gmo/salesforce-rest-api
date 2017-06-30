@@ -43,10 +43,9 @@ class PasswordAuthentication implements AuthenticationInterface, LoggerAwareInte
         $username,
         $password,
         $loginApiUrl = self::SALESFORCE_SANDBOX_LOGIN_URL,
-        Http\ClientInterface $guzzle = null,
-        LoggerInterface $log = null
+        Http\ClientInterface $guzzle = null
     ) {
-        $this->log = $log ?: new NullLogger();
+        $this->log = new NullLogger();
         $this->clientId = $clientId;
         $this->clientSecret = $clientSecret;
         $this->username = $username;
