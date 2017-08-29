@@ -5,7 +5,6 @@ A simple PHP client for the Salesforce REST API
 
 Install with composer:
 ```
-composer config repositories.salesforce-rest-api vcs https://github.com/gmo/salesforce-rest-api
 composer require "gmo/salesforce-rest-api:^1.0"
 ```
 
@@ -22,11 +21,9 @@ $authentication = new Salesforce\Authentication\PasswordAuthentication(
 	"ClientId",
 	"ClientSecret",
 	"Username",
-	"Password",
-	"SecurityToken",
-	new Http\Client()
+	"Password[+SecurityToken]"
 );
-$salesforce = new Salesforce\Client($authentication, new Http\Client(), "na5");
+$salesforce = new Salesforce\Client($authentication);
 
 try {
 	$contactQueryResults = $salesforce->query("SELECT AccountId, LastName
