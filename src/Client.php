@@ -346,11 +346,10 @@ class Client implements LoggerAwareInterface
      * @param string[] $fields The fields to update
      * @return bool
      */
-    public function update(string $object, string $id, ArrayCollection $fields)
+    public function update(string $object, string $id, array $fields)
     {
         $this->log->info('Updating Salesforce object', ['id' => $id, 'object' => $object]);
         $id = urlencode($id);
-        $fields = json_encode($fields);
         $headers = ['Content-Type' => 'application/json'];
 
         $url = sprintf(self::SALESFORCE_PATCH_PATTERN, $object, $id);
@@ -359,7 +358,7 @@ class Client implements LoggerAwareInterface
         return true;
     }
 
-    protected function patch(string $url, array $headers = [], string $body = null)
+    protected function patch(string $url, array $headers = [], $body = null)
     {
         return $this->requestWithAutomaticReauthorize('PATCH', $url, $headers, $body);
     }
